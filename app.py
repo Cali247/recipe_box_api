@@ -8,11 +8,22 @@ That is the point: you will add both, lesson by lesson, in Units 2 and 3.
 import sqlite3
 
 from flask import Flask, g, jsonify, request
+from werkzeug.security import generate_password_hash, check_password_hash
 
 DATABASE = "recipes.db"
 
 app = Flask(__name__)
 
+def hash_password(plain_password: str) -> str:
+    """Return a secure hash of the given plaintext password."""
+    return generate_password_hash(plain_password, method="pbkdf2:sha256")
+
+
+def verify_password(stored_hash: str, candidate_password: str) -> bool:
+    """Return True if the candidate_password matches the stored hash."""
+    return check_password_hash(stored_hash, candidate_password)
+
+# then keep the rest: get_db, close_db, recipe routes, register, etc.
 
 def get_db():
     if "db" not in g:
@@ -85,6 +96,59 @@ def create_recipe():
     ).fetchone()
     return jsonify(recipe_to_dict(row)), 201
 
+@app.post("/register")
+def register():
+    data = request.get_json(silent=True)
+
+    if not data:
+        return jsonify({"error": "a JSON body is required"}), 400
+
+    email = data.get("email")
+    password = data.get("password")
+
+    if not email or not password:
+        return jsonify({"error": "email and password are required"}), 400
+
+    # hash the password using your helper
+    password_hash = hash_password(password)
+
+    db = get_db()
+    try:
+        cur = db.execute(
+            "INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)",
+            (email, email, password_hash),
+        )
+        db.commit()
+    except sqlite3.IntegrityError:
+        return jsonify({"error": "an account with that email already exists"}), 409
+
+    return jsonify({"id": cur.lastrowid, "email": email}), 201
+
+@app.post("/login")
+def login():
+    data = request.get_json(silent=True)
+
+    if not data:
+        return jsonify({"error": "a JSON body is required"}), 400
+
+    email = data.get("email")
+    password = data.get("password")
+
+    if not email or not password:
+        return jsonify({"error": "email and password are required"}), 400
+
+    db = get_db()
+    user = db.execute(
+        "SELECT id, email, password_hash FROM users WHERE email = ?",
+        (email,),
+    ).fetchone()
+
+    # Generic authentication failure: same response for "no such email" and "wrong password"
+    if user is None or not verify_password(user["password_hash"], password):
+        return jsonify({"error": "invalid credentials"}), 401
+
+    # Success: return safe identity info only
+    return jsonify({"id": user["id"], "email": user["email"]}), 200    
 
 @app.patch("/recipes/<int:recipe_id>")
 def update_recipe(recipe_id):
