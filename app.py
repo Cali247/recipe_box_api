@@ -10,6 +10,15 @@ import sqlite3
 from flask import Flask, g, jsonify, request
 from werkzeug.security import generate_password_hash, check_password_hash
 
+import os
+from dotenv import load_dotenv
+
+import jwt
+from datetime import datetime, timedelta
+
+load_dotenv()
+JWT_SECRET = os.getenv("JWT_SECRET")
+
 DATABASE = "recipes.db"
 
 app = Flask(__name__)
@@ -147,8 +156,19 @@ def login():
     if user is None or not verify_password(user["password_hash"], password):
         return jsonify({"error": "invalid credentials"}), 401
 
-    # Success: return safe identity info only
-    return jsonify({"id": user["id"], "email": user["email"]}), 200    
+    # Success: issue a signed JWT carrying the authenticated identity
+    payload = {
+        "sub": str(user["id"]),  # subject = user id as a string
+        "exp": datetime.utcnow() + timedelta(hours=1),  # token expires in 1 hour
+    }
+
+    token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+
+    return jsonify({
+        "id": user["id"],
+        "email": user["email"],
+        "token": token,
+    }), 200 
 
 @app.patch("/recipes/<int:recipe_id>")
 def update_recipe(recipe_id):
